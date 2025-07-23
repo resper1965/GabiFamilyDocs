@@ -10,6 +10,7 @@ from ..services.paperless_service import PaperlessService
 from ..schemas.auth import UserInfo
 from ..models.member import FamilyMember
 from ..models.document import Document
+from ..models.subscription import Subscription, SubscriptionStatus
 
 router = APIRouter()
 
@@ -131,7 +132,37 @@ async def generate_document(
             )
         
         # Verificar limites de IA da assinatura
-        # TODO: Implementar verificação de limites
+        subscription = db.query(Subscription).filter(
+            Subscription.family_id == current_user.family_id
+        ).first()
+
+        if not subscription:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Assinatura n\u00e3o encontrada"
+            )
+
+        if subscription.status != SubscriptionStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Assinatura inativa"
+            )
+
+        if subscription.current_ai_requests_this_month >= subscription.max_ai_requests_per_month:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Limite de requisi\u00e7\u00f5es de IA excedido"
+            )
+
+        if subscription.current_documents >= subscription.max_documents:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Limite de documentos excedido"
+            )
+
+        subscription.current_ai_requests_this_month += 1
+        db.commit()
+        db.refresh(subscription)
         
         ollama_service = OllamaService()
         paperless_service = PaperlessService()
@@ -201,8 +232,10 @@ async def generate_document(
         )
         
         db.add(document)
+        subscription.current_documents += 1
         db.commit()
         db.refresh(document)
+        db.refresh(subscription)
         
         return GenerateDocumentResponse(
             success=True,
