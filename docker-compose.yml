@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  # Banco de dados principal
+  postgres:
+    image: postgres:15
+    container_name: gabifamilydocs_postgres
+    environment:
+      POSTGRES_DB: gabifamilydocs
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - gabifamily_network
+
+  # Keycloak para autenticação
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: gabifamilydocs_keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: postgres
+      KC_HOSTNAME_STRICT: false
+      KC_HTTP_ENABLED: true
+    command:
+      - start-dev
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+    networks:
+      - gabifamily_network
+
+  # Paperless NG para GED
+  paperless-ng:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    container_name: gabifamilydocs_paperless
+    environment:
+      PAPERLESS_REDIS: redis://redis:6379
+      PAPERLESS_DBHOST: postgres
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: postgres
+      PAPERLESS_DBPASS: postgres
+      PAPERLESS_ADMIN_USER: admin
+      PAPERLESS_ADMIN_PASSWORD: admin
+      PAPERLESS_URL: http://localhost:8000
+      PAPERLESS_SECRET_KEY: your-secret-key-here
+      PAPERLESS_ALLOWED_HOSTS: "*"
+    volumes:
+      - paperless_data:/usr/src/paperless/data
+      - paperless_media:/usr/src/paperless/media
+      - paperless_export:/usr/src/paperless/export
+      - paperless_consume:/usr/src/paperless/consume
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8001:8000"
+    networks:
+      - gabifamily_network
+
+  # Redis para Paperless NG
+  redis:
+    image: redis:7
+    container_name: gabifamilydocs_redis
+    networks:
+      - gabifamily_network
+
+  # Ollama para IA local
+  ollama:
+    image: ollama/ollama:latest
+    container_name: gabifamilydocs_ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - gabifamily_network
+
+  # Backend da aplicação
+  backend:
+    build: ./backend
+    container_name: gabifamilydocs_backend
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/gabifamilydocs
+      KEYCLOAK_URL: http://keycloak:8080
+      PAPERLESS_URL: http://paperless-ng:8000
+      OLLAMA_URL: http://ollama:11434
+      SECRET_KEY: your-secret-key-here
+    depends_on:
+      - postgres
+      - keycloak
+      - paperless-ng
+      - ollama
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./backend:/app
+    networks:
+      - gabifamily_network
+
+  # Frontend da aplicação
+  frontend:
+    build: ./frontend
+    container_name: gabifamilydocs_frontend
+    environment:
+      REACT_APP_API_URL: http://localhost:8002
+      REACT_APP_KEYCLOAK_URL: http://localhost:8080
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - gabifamily_network
+
+volumes:
+  postgres_data:
+  paperless_data:
+  paperless_media:
+  paperless_export:
+  paperless_consume:
+  ollama_data:
+
+networks:
+  gabifamily_network:
+    driver: bridge
