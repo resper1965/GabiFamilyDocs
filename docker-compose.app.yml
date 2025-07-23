@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # Backend da aplicação
+  backend:
+    build: ./backend
+    container_name: gabi-family-docs_backend
+    environment:
+      DATABASE_URL: postgresql://postgres:ff86f0a7d8d27245d419@host.docker.internal:5432/gabi-family-docs?sslmode=disable
+      KEYCLOAK_URL: http://host.docker.internal:8080
+      PAPERLESS_URL: https://host.docker.internal
+      OLLAMA_URL: http://host.docker.internal:11434
+      SECRET_KEY: your-secret-key-here
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./backend:/app
+    networks:
+      - gabifamily_network
+
+  # Frontend da aplicação
+  frontend:
+    build: ./frontend
+    container_name: gabi-family-docs_frontend
+    environment:
+      REACT_APP_API_URL: http://localhost:8002
+      REACT_APP_KEYCLOAK_URL: http://localhost:8080
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - gabifamily_network
+
+networks:
+  gabifamily_network:
+    driver: bridge 
