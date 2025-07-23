@@ -13,7 +13,7 @@ class FamilyUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
 
-class FamilyResponse(FamilyBase):
+class Family(FamilyBase):
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -22,6 +22,14 @@ class FamilyResponse(FamilyBase):
     class Config:
         from_attributes = True
 
+# Alias para compatibilidade
+FamilyResponse = Family
+
+class FamilyWithStats(Family):
+    total_members: int
+    total_documents: int
+    documents_expiring_soon: int
+
 class FamilyList(BaseModel):
-    families: List[FamilyResponse]
+    families: List[Family]
     total: int

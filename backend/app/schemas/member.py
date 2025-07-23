@@ -19,6 +19,7 @@ class FamilyMemberBase(BaseModel):
     address_zipcode: Optional[str] = None
 
 class FamilyMemberCreate(FamilyMemberBase):
+    family_id: int
     role: Optional[FamilyRole] = FamilyRole.MEMBER
 
 class FamilyMemberUpdate(BaseModel):
@@ -37,7 +38,7 @@ class FamilyMemberUpdate(BaseModel):
     address_zipcode: Optional[str] = None
     role: Optional[FamilyRole] = None
 
-class FamilyMemberResponse(FamilyMemberBase):
+class FamilyMember(FamilyMemberBase):
     id: int
     family_id: int
     keycloak_user_id: Optional[str] = None
@@ -48,6 +49,12 @@ class FamilyMemberResponse(FamilyMemberBase):
     class Config:
         from_attributes = True
 
+# Alias para compatibilidade
+FamilyMemberResponse = FamilyMember
+
+class FamilyMemberWithDocuments(FamilyMember):
+    documents: List['Document'] = []
+
 class FamilyMemberList(BaseModel):
-    members: List[FamilyMemberResponse]
+    members: List[FamilyMember]
     total: int

@@ -31,6 +31,14 @@ app.add_middleware(
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(chat.router, prefix=f"{settings.API_V1_STR}/chat", tags=["chat"])
 
+# Importar e incluir novos routers
+from .api import families, members, documents, subscriptions, invitations
+app.include_router(families.router, prefix=f"{settings.API_V1_STR}/families", tags=["families"])
+app.include_router(members.router, prefix=f"{settings.API_V1_STR}/members", tags=["members"])
+app.include_router(documents.router, prefix=f"{settings.API_V1_STR}/documents", tags=["documents"])
+app.include_router(subscriptions.router, prefix=f"{settings.API_V1_STR}/subscriptions", tags=["subscriptions"])
+app.include_router(invitations.router, prefix=f"{settings.API_V1_STR}/invitations", tags=["invitations"])
+
 @app.on_event("startup")
 async def startup_event():
     """Configuração inicial da aplicação"""

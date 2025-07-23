@@ -11,6 +11,7 @@ class InvitationStatus(enum.Enum):
     ACCEPTED = "accepted"
     DECLINED = "declined"
     EXPIRED = "expired"
+    CANCELLED = "cancelled"
 
 class Invitation(Base):
     __tablename__ = "invitations"
@@ -32,6 +33,7 @@ class Invitation(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False)  # 7 dias por padrão
     accepted_at = Column(DateTime(timezone=True), nullable=True)
+    member_id = Column(Integer, ForeignKey("family_members.id"), nullable=True)  # Membro criado após aceitar
     
     # Relacionamentos
     family = relationship("Family", back_populates="invitations")
