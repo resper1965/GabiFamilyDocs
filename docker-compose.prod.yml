@@ -1,0 +1,213 @@
+version: '3.8'
+
+services:
+  # Banco de dados principal
+  postgres:
+    image: postgres:15
+    container_name: gabifamilydocs_postgres_prod
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gabifamilydocs}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - gabifamily_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Keycloak para autenticação
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: gabifamilydocs_keycloak_prod
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-postgres}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HOSTNAME_STRICT: false
+      KC_HTTP_ENABLED: true
+      KC_PROXY: edge
+      KC_HOSTNAME: ${DOMAIN_NAME}
+    command:
+      - start
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - gabifamily_network
+    restart: unless-stopped
+
+  # Paperless NG para GED
+  paperless-ng:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    container_name: gabifamilydocs_paperless_prod
+    environment:
+      PAPERLESS_REDIS: redis://redis:6379
+      PAPERLESS_DBHOST: postgres
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: ${POSTGRES_USER:-postgres}
+      PAPERLESS_DBPASS: ${POSTGRES_PASSWORD}
+      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER:-admin}
+      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD}
+      PAPERLESS_URL: https://${DOMAIN_NAME}
+      PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY}
+      PAPERLESS_ALLOWED_HOSTS: ${DOMAIN_NAME}
+      PAPERLESS_CSRF_TRUSTED_ORIGINS: https://${DOMAIN_NAME}
+    volumes:
+      - paperless_data:/usr/src/paperless/data
+      - paperless_media:/usr/src/paperless/media
+      - paperless_export:/usr/src/paperless/export
+      - paperless_consume:/usr/src/paperless/consume
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gabifamily_network
+    restart: unless-stopped
+
+  # Redis para Paperless NG
+  redis:
+    image: redis:7-alpine
+    container_name: gabifamilydocs_redis_prod
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - gabifamily_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Ollama para IA local
+  ollama:
+    image: ollama/ollama:latest
+    container_name: gabifamilydocs_ollama_prod
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - gabifamily_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Backend da aplicação
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: gabifamilydocs_backend_prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gabifamilydocs}
+      KEYCLOAK_URL: http://keycloak:8080
+      PAPERLESS_URL: http://paperless-ng:8000
+      OLLAMA_URL: http://ollama:11434
+      SECRET_KEY: ${BACKEND_SECRET_KEY}
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      paperless-ng:
+        condition: service_started
+      ollama:
+        condition: service_started
+    networks:
+      - gabifamily_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend da aplicação
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: gabifamilydocs_frontend_prod
+    environment:
+      REACT_APP_API_URL: https://${DOMAIN_NAME}/api
+      REACT_APP_KEYCLOAK_URL: https://${DOMAIN_NAME}/auth
+    depends_on:
+      - backend
+    networks:
+      - gabifamily_network
+    restart: unless-stopped
+
+  # Traefik como reverse proxy
+  traefik:
+    image: traefik:v2.10
+    container_name: gabifamilydocs_traefik_prod
+    command:
+      - --api.insecure=false
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --log.level=INFO
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certs:/letsencrypt
+    networks:
+      - gabifamily_network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_AUTH}"
+
+volumes:
+  postgres_data:
+    driver: local
+  paperless_data:
+    driver: local
+  paperless_media:
+    driver: local
+  paperless_export:
+    driver: local
+  paperless_consume:
+    driver: local
+  ollama_data:
+    driver: local
+  redis_data:
+    driver: local
+  traefik_certs:
+    driver: local
+
+networks:
+  gabifamily_network:
+    driver: bridge 
