@@ -1,0 +1,94 @@
+# BMad Core Configuration
+# Gabi Family Docs Project
+
+# Developer Context Files
+# Files that the dev agent should always load
+devLoadAlwaysFiles:
+  - docs/architecture/coding-standards.md
+  - docs/architecture/tech-stack.md
+  - docs/architecture/project-structure.md
+  - docs/architecture/security-standards.md
+  - docs/architecture/performance-standards.md
+
+# Project Structure Configuration
+projectStructure:
+  docsPath: "docs"
+  templatesPath: "templates"
+  tasksPath: "tasks"
+  qaPath: "docs/qa"
+  epicsPath: "docs/epics"
+  storiesPath: "docs/stories"
+
+# Agent Configuration
+agents:
+  analyst:
+    enabled: true
+    outputPath: "docs/requirements"
+  productOwner:
+    enabled: true
+    outputPath: "docs/backlog"
+  architect:
+    enabled: true
+    outputPath: "docs/architecture"
+  developer:
+    enabled: true
+    outputPath: "src"
+  qa:
+    enabled: true
+    outputPath: "docs/qa"
+  security:
+    enabled: true
+    outputPath: "docs/security"
+  performance:
+    enabled: true
+    outputPath: "docs/performance"
+  projectManager:
+    enabled: true
+    outputPath: "docs/project"
+  scrumMaster:
+    enabled: true
+    outputPath: "docs/scrum"
+  uxDesigner:
+    enabled: true
+    outputPath: "docs/design"
+
+# Quality Gates Configuration
+qualityGates:
+  enabled: true
+  strictMode: false
+  autoReview: true
+  riskThreshold: 6
+  nfrThreshold: 7
+
+# Development Workflow
+workflow:
+  planningPhase: true
+  developmentPhase: true
+  reviewPhase: true
+  deploymentPhase: true
+
+# Context7 Integration
+context7:
+  enabled: true
+  libraryIds:
+    - "react-native"
+    - "supabase"
+    - "expo"
+    - "typescript"
+    - "jest"
+    - "react-native-testing-library"
+    - "react-native-performance"
+    - "react-native-reanimated"
+
+# Version Control
+versionControl:
+  autoCommit: true
+  commitMessageTemplate: "feat: {story} - {description}"
+  branchStrategy: "feature-branch"
+
+# Documentation
+documentation:
+  autoGenerate: true
+  includeDiagrams: true
+  format: "markdown"
+  language: "pt-BR"
