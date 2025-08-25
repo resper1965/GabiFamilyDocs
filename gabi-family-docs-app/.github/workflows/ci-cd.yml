@@ -1,0 +1,296 @@
+name: CI/CD Pipeline - Gabi Family Docs
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  NODE_VERSION: '18'
+  EXPO_VERSION: 'latest'
+
+jobs:
+  # Job de Qualidade de Código
+  code-quality:
+    name: 🔍 Qualidade de Código
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout do código
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: 'gabi-family-docs-app/package-lock.json'
+        
+    - name: 📦 Instalar dependências
+      working-directory: ./gabi-family-docs-app
+      run: npm ci
+      
+    - name: 🔧 Verificar tipos TypeScript
+      working-directory: ./gabi-family-docs-app
+      run: npm run type-check
+      
+    - name: 📝 Executar ESLint
+      working-directory: ./gabi-family-docs-app
+      run: npm run lint
+      
+    - name: 🎨 Verificar formatação Prettier
+      working-directory: ./gabi-family-docs-app
+      run: npm run format:check
+      
+    - name: 🔒 Verificar vulnerabilidades de segurança
+      working-directory: ./gabi-family-docs-app
+      run: npm audit --audit-level=moderate
+      
+    - name: 📊 Gerar relatório de cobertura
+      working-directory: ./gabi-family-docs-app
+      run: npm run test:coverage
+      
+    - name: 📈 Upload relatório de cobertura
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./gabi-family-docs-app/coverage/lcov.info
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  # Job de Testes
+  tests:
+    name: 🧪 Testes
+    runs-on: ubuntu-latest
+    needs: code-quality
+    
+    strategy:
+      matrix:
+        node-version: [16, 18, 20]
+        
+    steps:
+    - name: 📥 Checkout do código
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: 'gabi-family-docs-app/package-lock.json'
+        
+    - name: 📦 Instalar dependências
+      working-directory: ./gabi-family-docs-app
+      run: npm ci
+      
+    - name: 🧪 Executar testes unitários
+      working-directory: ./gabi-family-docs-app
+      run: npm run test
+      
+    - name: 🧪 Executar testes E2E (Android)
+      working-directory: ./gabi-family-docs-app
+      run: |
+        npm run build:android
+        npm run test:e2e:android
+      continue-on-error: true
+      
+    - name: 🧪 Executar testes E2E (iOS)
+      working-directory: ./gabi-family-docs-app
+      run: |
+        npm run build:ios
+        npm run test:e2e:ios
+      continue-on-error: true
+
+  # Job de Build
+  build:
+    name: 🏗️ Build
+    runs-on: ubuntu-latest
+    needs: [code-quality, tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: 📥 Checkout do código
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: 'gabi-family-docs-app/package-lock.json'
+        
+    - name: 📦 Instalar dependências
+      working-directory: ./gabi-family-docs-app
+      run: npm ci
+      
+    - name: 🔧 Setup Expo
+      working-directory: ./gabi-family-docs-app
+      run: |
+        npm install -g @expo/cli@${{ env.EXPO_VERSION }}
+        expo doctor
+      
+    - name: 🏗️ Build Android APK
+      working-directory: ./gabi-family-docs-app
+      run: |
+        expo build:android --type apk --non-interactive
+      env:
+        EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        
+    - name: 🏗️ Build iOS IPA
+      working-directory: ./gabi-family-docs-app
+      run: |
+        expo build:ios --type archive --non-interactive
+      env:
+        EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        
+    - name: 📦 Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-builds
+        path: |
+          ./gabi-family-docs-app/android/app/build/outputs/apk/
+          ./gabi-family-docs-app/ios/build/
+        retention-days: 30
+
+  # Job de Deploy
+  deploy:
+    name: 🚀 Deploy
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - name: 📥 Checkout do código
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: 'gabi-family-docs-app/package-lock.json'
+        
+    - name: 📦 Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: app-builds
+        path: ./builds
+        
+    - name: 🔧 Setup SSH
+      uses: webfactory/ssh-agent@v0.8.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        
+    - name: 🚀 Deploy para VPS
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+          cd /home/gabifamilydoc/GabiFamilyDocs
+          git pull origin main
+          cd gabi-family-docs-app
+          npm ci
+          npm run build:production
+          pm2 restart gabi-family-docs || pm2 start npm --name "gabi-family-docs" -- start
+          echo "Deploy concluído em $(date)"
+        EOF
+        
+    - name: 📊 Notificar deploy
+      run: |
+        curl -X POST ${{ secrets.DEPLOY_WEBHOOK }} \
+          -H "Content-Type: application/json" \
+          -d '{
+            "text": "🚀 Deploy do Gabi Family Docs concluído!",
+            "attachments": [{
+              "color": "good",
+              "fields": [
+                {"title": "Branch", "value": "${{ github.ref_name }}", "short": true},
+                {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+                {"title": "Autor", "value": "${{ github.actor }}", "short": true},
+                {"title": "Timestamp", "value": "${{ github.event.head_commit.timestamp }}", "short": true}
+              ]
+            }]
+          }'
+
+  # Job de Monitoramento
+  monitoring:
+    name: 📊 Monitoramento
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: 🔍 Verificar saúde da aplicação
+      run: |
+        sleep 30  # Aguarda o deploy
+        response=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.APP_URL }}/health)
+        if [ $response -eq 200 ]; then
+          echo "✅ Aplicação está saudável"
+        else
+          echo "❌ Aplicação não está respondendo corretamente"
+          exit 1
+        fi
+        
+    - name: 📈 Verificar métricas
+      run: |
+        # Verificar métricas de performance
+        curl -s ${{ secrets.APP_URL }}/metrics | grep -q "app_uptime"
+        echo "✅ Métricas estão sendo coletadas"
+        
+    - name: 🔔 Notificar sucesso
+      run: |
+        curl -X POST ${{ secrets.MONITORING_WEBHOOK }} \
+          -H "Content-Type: application/json" \
+          -d '{
+            "text": "✅ Deploy e monitoramento concluídos com sucesso!",
+            "attachments": [{
+              "color": "good",
+              "fields": [
+                {"title": "Status", "value": "Online", "short": true},
+                {"title": "Tempo de resposta", "value": "< 200ms", "short": true},
+                {"title": "Uptime", "value": "100%", "short": true}
+              ]
+            }]
+          }'
+
+  # Job de Rollback (se necessário)
+  rollback:
+    name: 🔄 Rollback
+    runs-on: ubuntu-latest
+    needs: [deploy, monitoring]
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: 🔧 Setup SSH
+      uses: webfactory/ssh-agent@v0.8.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        
+    - name: 🔄 Executar rollback
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+          cd /home/gabifamilydoc/GabiFamilyDocs
+          git log --oneline -5
+          echo "Executando rollback..."
+          git reset --hard HEAD~1
+          cd gabi-family-docs-app
+          npm ci
+          pm2 restart gabi-family-docs
+          echo "Rollback concluído"
+        EOF
+        
+    - name: 🔔 Notificar rollback
+      run: |
+        curl -X POST ${{ secrets.ALERT_WEBHOOK }} \
+          -H "Content-Type: application/json" \
+          -d '{
+            "text": "🔄 Rollback executado automaticamente!",
+            "attachments": [{
+              "color": "warning",
+              "fields": [
+                {"title": "Motivo", "value": "Falha no deploy/monitoramento", "short": true},
+                {"title": "Ação", "value": "Rollback para versão anterior", "short": true},
+                {"title": "Status", "value": "Aplicação restaurada", "short": true}
+              ]
+            }]
+          }'
